@@ -25,45 +25,44 @@
         }
         .note { font-size: 0.78em; color: #666; margin-top: 14px; }
 
-        /* メイン画面 */
-        #app { display: none; position: relative; height: 100dvh; }
+        /* メイン画面：上から順に積む */
+        #app {
+            display: none; flex-direction: column; height: 100dvh; position: relative;
+        }
 
         #video {
-            width: 100%; height: 52dvh; object-fit: cover; display: block; background: #000;
+            width: 100%; height: 48dvh; object-fit: cover; display: block;
+            flex-shrink: 0; background: #000;
         }
 
-        /* タップボタン：カメラ映像の上に重ねる */
+        /* 翻訳ボタン：カメラの真下、普通のボタン */
         #tap-btn {
-            position: absolute;
-            top: 0; left: 0; right: 0; height: 52dvh;
-            display: flex; align-items: center; justify-content: center;
-            background: transparent; border: none; cursor: pointer;
-            -webkit-tap-highlight-color: transparent;
+            flex-shrink: 0; width: 100%;
+            padding: 18px; font-size: 1.15em; font-weight: bold;
+            background: #4285f4; color: #fff; border: none; cursor: pointer;
+            letter-spacing: 0.05em; touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(255,255,255,0.2);
         }
-        #tap-hint {
-            background: rgba(66,133,244,0.75); color: #fff;
-            padding: 12px 28px; border-radius: 30px; font-size: 1.1em;
-            pointer-events: none; transition: opacity 0.15s;
-        }
-        /* 翻訳中はヒントを薄くする */
-        #app.loading #tap-hint { opacity: 0.3; }
+        #app.loading #tap-btn { background: #2a5db0; }
+        #tap-hint { pointer-events: none; }
 
-        /* ステータスバー */
+        /* ステータスバー：カメラの上に重ねる */
         #status-bar {
             position: absolute; top: 0; left: 0; right: 0;
             display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 12px; background: rgba(0,0,0,0.55); z-index: 10; pointer-events: none;
+            padding: 8px 12px; background: rgba(0,0,0,0.55);
+            z-index: 10; pointer-events: none;
         }
         #status-text { font-size: 0.78em; color: #ddd; }
         #reset-btn {
-            background: none; border: none; color: #666; font-size: 0.75em;
+            background: none; border: none; color: #888; font-size: 0.75em;
             cursor: pointer; pointer-events: all;
         }
 
-        /* 翻訳ボックス */
+        /* 翻訳ボックス：残りの高さをすべて使う */
         #translation-box {
-            position: absolute; bottom: 0; left: 0; right: 0; height: 48dvh;
-            background: rgba(10,10,10,0.97); padding: 14px 16px 20px; overflow-y: auto;
+            flex: 1; overflow-y: auto;
+            background: #0a0a0a; padding: 14px 16px 20px;
             border-top: 1px solid #1e1e1e;
         }
         #translation-label {
@@ -92,21 +91,22 @@
 
 <!-- メイン -->
 <div id="app">
+    <!-- カメラ映像 -->
     <video id="video" autoplay playsinline muted></video>
 
-    <!-- カメラ全体がタップ領域 -->
+    <!-- カメラの真下に独立したボタン -->
     <button id="tap-btn" onclick="translate()">
-        <span id="tap-hint">タップして翻訳</span>
+        <span id="tap-hint">📷 タップして翻訳</span>
     </button>
 
     <div id="status-bar">
-        <span id="status-text">翻訳したい箇所にカメラを向けてタップ</span>
+        <span id="status-text">カメラを向けてボタンを押す</span>
         <button id="reset-btn" onclick="resetKey()">キー変更</button>
     </div>
 
     <div id="translation-box">
         <div id="translation-label">翻訳結果</div>
-        <div id="translation-text" style="color:#444">カメラを向けてタップすると翻訳します<span id="cursor">▍</span></div>
+        <div id="translation-text" style="color:#444">上のボタンを押すと翻訳します<span id="cursor">▍</span></div>
     </div>
 </div>
 
@@ -144,7 +144,7 @@
 
     async function startApp() {
         document.getElementById('setup').style.display = 'none';
-        document.getElementById('app').style.display = 'block';
+        document.getElementById('app').style.display = 'flex';
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
