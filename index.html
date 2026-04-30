@@ -1,94 +1,247 @@
-    async function captureAndTranslate() {
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>医学論文翻訳</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; color: #fff; font-family: sans-serif; height: 100dvh; overflow: hidden; }
+
+        /* セットアップ画面 */
+        #setup {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; height: 100dvh; padding: 24px; text-align: center; background: #111;
+        }
+        #setup h1 { font-size: 1.4em; margin-bottom: 12px; }
+        #setup p  { color: #aaa; font-size: 0.9em; margin-bottom: 24px; line-height: 1.6; }
+        #setup input {
+            width: 100%; padding: 14px; font-size: 1em; border-radius: 10px;
+            border: 1px solid #444; background: #222; color: #fff; margin-bottom: 12px;
+        }
+        #setup button {
+            width: 100%; padding: 16px; font-size: 1.1em;
+            background: #4285f4; color: #fff; border: none; border-radius: 10px; cursor: pointer;
+        }
+        .note { font-size: 0.78em; color: #666; margin-top: 14px; }
+
+        /* メイン画面 */
+        #app { display: none; position: relative; height: 100dvh; }
+
+        #video {
+            width: 100%; height: 52dvh; object-fit: cover; display: block; background: #000;
+        }
+
+        /* タップボタン：カメラ映像の上に重ねる */
+        #tap-btn {
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 52dvh;
+            display: flex; align-items: center; justify-content: center;
+            background: transparent; border: none; cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #tap-hint {
+            background: rgba(66,133,244,0.75); color: #fff;
+            padding: 12px 28px; border-radius: 30px; font-size: 1.1em;
+            pointer-events: none; transition: opacity 0.15s;
+        }
+        /* 翻訳中はヒントを薄くする */
+        #app.loading #tap-hint { opacity: 0.3; }
+
+        /* ステータスバー */
+        #status-bar {
+            position: absolute; top: 0; left: 0; right: 0;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 12px; background: rgba(0,0,0,0.55); z-index: 10; pointer-events: none;
+        }
+        #status-text { font-size: 0.78em; color: #ddd; }
+        #reset-btn {
+            background: none; border: none; color: #666; font-size: 0.75em;
+            cursor: pointer; pointer-events: all;
+        }
+
+        /* 翻訳ボックス */
+        #translation-box {
+            position: absolute; bottom: 0; left: 0; right: 0; height: 48dvh;
+            background: rgba(10,10,10,0.97); padding: 14px 16px 20px; overflow-y: auto;
+            border-top: 1px solid #1e1e1e;
+        }
+        #translation-label {
+            font-size: 0.72em; color: #555; margin-bottom: 8px; letter-spacing: 0.05em;
+        }
+        #translation-text {
+            font-size: 1.05em; line-height: 1.85; color: #f0f0f0; white-space: pre-wrap;
+        }
+
+        /* 翻訳中のカーソル点滅 */
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        #cursor { display: none; animation: blink 0.7s infinite; color: #4285f4; }
+        #app.loading #cursor { display: inline; }
+    </style>
+</head>
+<body>
+
+<!-- セットアップ -->
+<div id="setup">
+    <h1>📋 医学論文翻訳</h1>
+    <p>Gemini APIキーを入力してください。<br>一度入力すれば次回から不要です。</p>
+    <input type="password" id="api-key-input" placeholder="AIza...">
+    <button onclick="saveAndStart()">翻訳を開始する</button>
+    <p class="note">APIキーはこのデバイス内にのみ保存されます。</p>
+</div>
+
+<!-- メイン -->
+<div id="app">
+    <video id="video" autoplay playsinline muted></video>
+
+    <!-- カメラ全体がタップ領域 -->
+    <button id="tap-btn" onclick="translate()">
+        <span id="tap-hint">タップして翻訳</span>
+    </button>
+
+    <div id="status-bar">
+        <span id="status-text">翻訳したい箇所にカメラを向けてタップ</span>
+        <button id="reset-btn" onclick="resetKey()">キー変更</button>
+    </div>
+
+    <div id="translation-box">
+        <div id="translation-label">翻訳結果</div>
+        <div id="translation-text" style="color:#444">カメラを向けてタップすると翻訳します<span id="cursor">▍</span></div>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse';
+    const CAPTURE_WIDTH = 768;
+
+    const PROMPT = `画像内の英語テキストを日本語に翻訳してください。
+
+ルール：
+- 見えている英語の文・段落を文脈を保って完全に翻訳する
+- 医学・生殖医療・不妊治療の専門用語は正確な日本語訳を使う
+- 意味のある文単位で訳す（断片的な単語の列挙は不可）
+- 英語テキストが見当たらない場合のみ「（テキストなし）」と返す
+- 翻訳文だけを返す。説明・前置きは不要`;
+
+    let apiKey = '';
+    let isProcessing = false;
+
+    window.onload = () => {
+        const saved = localStorage.getItem('gemini_api_key');
+        if (saved) { apiKey = saved; startApp(); }
+    };
+
+    function saveAndStart() {
+        const key = document.getElementById('api-key-input').value.trim();
+        if (!key.startsWith('AIza')) {
+            alert('APIキーの形式が正しくありません（AIzaで始まるキーを入力してください）');
+            return;
+        }
+        localStorage.setItem('gemini_api_key', key);
+        apiKey = key;
+        startApp();
+    }
+
+    async function startApp() {
+        document.getElementById('setup').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+            });
+            document.getElementById('video').srcObject = stream;
+        } catch (e) {
+            alert('カメラへのアクセスが拒否されました。\nChromeのアドレスバー横の🔒をタップしてカメラを許可してください。');
+        }
+    }
+
+    async function translate() {
         if (isProcessing) return;
+
         const video = document.getElementById('video');
         if (!video.videoWidth) return;
 
         isProcessing = true;
-        showLoading(true);
+        document.getElementById('app').classList.add('loading');
+        setStatus('翻訳中...');
 
-        const vw = video.videoWidth;
-        const vh = video.videoHeight;
-        const sx = vw * CROP_X;
-        const sy = vh * CROP_Y;
-        const sw = vw * CROP_W;
-        const sh = vh * CROP_H;
-
-        const ratio = CAPTURE_WIDTH / sw;
+        // カメラ映像をフル画角でキャプチャ（切り抜きなし）
+        const ratio  = CAPTURE_WIDTH / video.videoWidth;
         const canvas = document.createElement('canvas');
         canvas.width  = CAPTURE_WIDTH;
-        canvas.height = Math.round(sh * ratio);
-        canvas.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-        const base64 = canvas.toDataURL('image/jpeg', 0.75).split(',')[1];
+        canvas.height = Math.round(video.videoHeight * ratio);
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
+
+        const el = document.getElementById('translation-text');
+        el.style.color = '#f0f0f0';
+        el.textContent = '';
+        document.getElementById('cursor').style.display = 'inline';
 
         try {
             const res = await fetch(`${API_URL}&key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    contents: [{
-                        parts: [
-                            { text: PROMPT },
-                            { inline_data: { mime_type: 'image/jpeg', data: base64 } }
-                        ]
-                    }],
+                    contents: [{ parts: [
+                        { text: PROMPT },
+                        { inline_data: { mime_type: 'image/jpeg', data: base64 } }
+                    ]}],
                     generationConfig: { maxOutputTokens: 1024, temperature: 0.1 }
                 })
             });
 
             if (!res.ok) {
-                const err = await res.json();
-                setStatus('エラー: ' + (err?.error?.message ?? res.status).toString().slice(0, 50));
-                showLoading(false);
+                const err = await res.json().catch(() => ({}));
+                setStatus('エラー: ' + (err?.error?.message ?? 'status ' + res.status).toString().slice(0, 60));
+                el.textContent = '';
                 isProcessing = false;
+                document.getElementById('app').classList.remove('loading');
                 return;
             }
 
-            // SSEストリームを読む：チャンクが届くたびに即座に画面に表示
+            // SSEストリームで逐次表示
             const reader  = res.body.getReader();
             const decoder = new TextDecoder();
-            let buffer    = '';
-            let fullText  = '';
-            let firstChunk = true;
+            let buf = '', fullText = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop(); // 未完了の行は次回に持ち越す
-
+                buf += decoder.decode(value, { stream: true });
+                const lines = buf.split('\n');
+                buf = lines.pop();
                 for (const line of lines) {
                     if (!line.startsWith('data: ')) continue;
-                    const jsonStr = line.slice(6).trim();
-                    if (jsonStr === '[DONE]') continue;
+                    const s = line.slice(6).trim();
+                    if (!s || s === '[DONE]') continue;
                     try {
-                        const chunk = JSON.parse(jsonStr);
-                        const piece = chunk?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-                        if (piece) {
-                            if (firstChunk) {
-                                // 最初のチャンクが来た瞬間に前の翻訳を消してすぐ表示
-                                document.getElementById('translation-text').style.color = '#f0f0f0';
-                                document.getElementById('translation-text').textContent = '';
-                                fullText = '';
-                                firstChunk = false;
-                                showLoading(false);
-                            }
-                            fullText += piece;
-                            document.getElementById('translation-text').textContent = fullText;
-                        }
+                        const piece = JSON.parse(s)?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+                        if (piece) { fullText += piece; el.textContent = fullText; }
                     } catch (_) {}
                 }
             }
 
-            if (fullText && fullText.trim() !== '（テキストなし）') {
-                const t = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                setStatus('✓ ' + t);
-            }
+            const t = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            setStatus('✓ ' + t + '　　次の箇所にカメラを向けてタップ');
         } catch (e) {
-            setStatus('ネットワークエラー');
+            setStatus('ネットワークエラー: ' + e.message);
         }
 
-        showLoading(false);
+        document.getElementById('cursor').style.display = 'none';
+        document.getElementById('app').classList.remove('loading');
         isProcessing = false;
     }
+
+    function resetKey() {
+        if (!confirm('APIキーをリセットしますか？')) return;
+        localStorage.removeItem('gemini_api_key');
+        location.reload();
+    }
+
+    function setStatus(msg) {
+        document.getElementById('status-text').textContent = msg;
+    }
+</script>
+</body>
+</html>
