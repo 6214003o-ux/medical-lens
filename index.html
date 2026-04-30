@@ -6,9 +6,9 @@
     <title>医学論文リアルタイム翻訳</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #000; color: #fff; font-family: sans-serif; height: 100dvh; overflow: hidden; }
+        body { background: #000; color: #fff; font-family: sans-serif; height: 100dvh; overflow: hidden; touch-action: none; }
 
-        /* --- セットアップ画面 --- */
+        /* セットアップ画面 */
         #setup {
             display: flex; flex-direction: column; align-items: center;
             justify-content: center; height: 100dvh; padding: 24px;
@@ -26,80 +26,119 @@
         }
         .note { font-size: 0.78em; color: #666; margin-top: 14px; }
 
-        /* --- メイン画面 --- */
-        #app { display: none; position: relative; height: 100dvh; }
+        /* メイン画面 */
+        #app { display: none; position: relative; height: 100dvh; flex-direction: column; }
 
+        #camera-wrap {
+            position: relative; width: 100%; height: 52dvh; background: #000; overflow: hidden;
+        }
         #video {
-            width: 100%; height: 58dvh; object-fit: cover; display: block; background: #000;
+            width: 100%; height: 100%; object-fit: cover; display: block;
+        }
+        /* フォーカス枠：カメラ中央のこのエリアを翻訳する */
+        #focus-frame {
+            position: absolute;
+            top: 15%; left: 10%; right: 10%; bottom: 15%;
+            border: 2px solid rgba(66,133,244,0.8);
+            border-radius: 6px;
+            pointer-events: none;
+        }
+        #focus-label {
+            position: absolute; top: calc(15% - 22px); left: 10%;
+            font-size: 0.72em; color: rgba(66,133,244,0.9);
+            background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 4px;
         }
 
-        #translation-box {
-            position: absolute; bottom: 0; left: 0; right: 0; height: 42dvh;
-            background: rgba(10,10,10,0.95); padding: 14px 16px; overflow-y: auto;
-        }
-        #translation-label {
-            font-size: 0.72em; color: #666; margin-bottom: 6px; letter-spacing: 0.05em;
-        }
-        #translation-text {
-            font-size: 1.05em; line-height: 1.75; color: #f0f0f0; white-space: pre-wrap;
-        }
-
+        /* ステータスバー */
         #status-bar {
             position: absolute; top: 0; left: 0; right: 0;
             display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 12px; background: rgba(0,0,0,0.55);
+            padding: 8px 12px; background: rgba(0,0,0,0.6); z-index: 10;
         }
         #status-text { font-size: 0.78em; color: #ccc; }
-
         #toggle-btn {
             background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
             color: #fff; padding: 6px 14px; border-radius: 20px;
             font-size: 0.82em; cursor: pointer;
         }
         #reset-btn {
-            background: none; border: none; color: #666; font-size: 0.78em; cursor: pointer;
+            background: none; border: none; color: #666; font-size: 0.75em; cursor: pointer;
+        }
+
+        /* 翻訳ボックス */
+        #translation-box {
+            position: absolute; bottom: 0; left: 0; right: 0; height: 48dvh;
+            background: rgba(10,10,10,0.96); padding: 14px 16px 20px; overflow-y: auto;
+            border-top: 1px solid #222;
+        }
+        #translation-label {
+            font-size: 0.72em; color: #555; margin-bottom: 8px; letter-spacing: 0.05em; text-transform: uppercase;
+        }
+        #translation-text {
+            font-size: 1.05em; line-height: 1.8; color: #f0f0f0; white-space: pre-wrap;
+        }
+        #loading-indicator {
+            display: none; color: #4285f4; font-size: 0.85em; margin-top: 6px;
         }
     </style>
 </head>
 <body>
 
-<!-- セットアップ画面 -->
+<!-- セットアップ -->
 <div id="setup">
     <h1>📋 医学論文翻訳</h1>
     <p>Gemini APIキーを入力してください。<br>一度入力すれば次回から不要です。</p>
     <input type="password" id="api-key-input" placeholder="AIza...（Google AI Studioで取得）">
-    <button onclick="saveAndStart()">カメラを起動して翻訳開始</button>
-    <p class="note">APIキーはこのデバイスのブラウザ内にのみ保存されます。<br>外部には送信されません。</p>
+    <button onclick="saveAndStart()">翻訳を開始する</button>
+    <p class="note">APIキーはこのデバイス内にのみ保存されます。</p>
 </div>
 
-<!-- メイン翻訳画面 -->
+<!-- メイン -->
 <div id="app">
-    <video id="video" autoplay playsinline muted></video>
+    <div id="camera-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <div id="focus-frame"></div>
+        <div id="focus-label">このエリアの英語を翻訳</div>
 
-    <div id="status-bar">
-        <span id="status-text">起動中...</span>
-        <button id="toggle-btn" onclick="togglePause()">⏸ 一時停止</button>
-        <button id="reset-btn" onclick="resetKey()">キー変更</button>
+        <div id="status-bar">
+            <span id="status-text">起動中...</span>
+            <button id="toggle-btn" onclick="togglePause()">⏸ 停止</button>
+            <button id="reset-btn" onclick="resetKey()">キー変更</button>
+        </div>
     </div>
 
     <div id="translation-box">
         <div id="translation-label">翻訳結果</div>
-        <div id="translation-text">カメラを英語テキストに向けてください</div>
+        <div id="translation-text" style="color:#555">カメラを英語テキストに向けてください</div>
+        <div id="loading-indicator">翻訳中...</div>
     </div>
 </div>
 
 <script>
     const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
-    const INTERVAL_MS = 1800;
-    const PROMPT = `画像内の英語テキストを自然な日本語に翻訳してください。
-医学・生殖医療・不妊治療の専門用語は正確に訳してください。
-英語以外のテキストがない場合は「（テキストなし）」とだけ返してください。
-翻訳文のみ返してください。説明や前置きは不要です。`;
+
+    // 画像サイズ：横800pxに縮小してAPIに送る（速度・精度のバランス）
+    const CAPTURE_WIDTH  = 800;
+
+    // フォーカス枠の割合（カメラ映像の中央80%×70%を切り出す）
+    const CROP_X = 0.10;
+    const CROP_Y = 0.15;
+    const CROP_W = 0.80;
+    const CROP_H = 0.70;
+
+    const PROMPT = `画像内の英語テキストを日本語に翻訳してください。
+
+ルール：
+- 見えている英語の文・段落を、文脈を保って完全に翻訳する
+- 医学・生殖医療・不妊治療の専門用語は正確な日本語訳を使う
+- 断片的な単語ではなく、意味のある文単位で訳す
+- 英語テキストが見当たらない場合のみ「（テキストなし）」と返す
+- 翻訳文だけを返す。説明・前置き・見出しは不要`;
 
     let apiKey = '';
-    let isRunning = false;
-    let intervalId = null;
+    let isPaused = false;
     let isProcessing = false;
+    let loopActive = false;
 
     window.onload = () => {
         const saved = localStorage.getItem('gemini_api_key');
@@ -119,9 +158,10 @@
 
     async function startApp() {
         document.getElementById('setup').style.display = 'none';
-        document.getElementById('app').style.display = 'block';
+        document.getElementById('app').style.display = 'flex';
         await startCamera();
-        startInterval();
+        loopActive = true;
+        translationLoop();
     }
 
     async function startCamera() {
@@ -130,47 +170,46 @@
                 video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
             });
             document.getElementById('video').srcObject = stream;
+            await new Promise(r => document.getElementById('video').onloadedmetadata = r);
         } catch (e) {
             alert('カメラへのアクセスが拒否されました。\nChromeのアドレスバー横の🔒をタップしてカメラを許可してください。');
         }
     }
 
-    function startInterval() {
-        isRunning = true;
-        intervalId = setInterval(captureAndTranslate, INTERVAL_MS);
-    }
-
-    function togglePause() {
-        if (isRunning) {
-            clearInterval(intervalId);
-            isRunning = false;
-            document.getElementById('toggle-btn').textContent = '▶ 再開';
-            document.getElementById('status-text').textContent = '一時停止中';
-        } else {
-            startInterval();
-            document.getElementById('toggle-btn').textContent = '⏸ 一時停止';
+    // 固定インターバルではなく「前の処理が終わったら次を開始」するループ
+    async function translationLoop() {
+        while (loopActive) {
+            if (!isPaused) {
+                await captureAndTranslate();
+            }
+            // 翻訳が速くても最低0.5秒は待つ（連続送信を防ぐ）
+            await sleep(500);
         }
-    }
-
-    function resetKey() {
-        if (!confirm('APIキーをリセットしますか？')) return;
-        localStorage.removeItem('gemini_api_key');
-        location.reload();
     }
 
     async function captureAndTranslate() {
         if (isProcessing) return;
         const video = document.getElementById('video');
-        if (video.readyState < 2) return;
+        if (!video.videoWidth) return;
 
         isProcessing = true;
-        setStatus('翻訳中...');
+        showLoading(true);
 
+        // フォーカス枠の領域だけを切り出す
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const sx = vw * CROP_X;
+        const sy = vh * CROP_Y;
+        const sw = vw * CROP_W;
+        const sh = vh * CROP_H;
+
+        // 切り出した領域を800px幅にリサイズ
+        const ratio = CAPTURE_WIDTH / sw;
         const canvas = document.createElement('canvas');
-        canvas.width  = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d').drawImage(video, 0, 0);
-        const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+        canvas.width  = CAPTURE_WIDTH;
+        canvas.height = Math.round(sh * ratio);
+        canvas.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
 
         try {
             const res = await fetch(`${API_URL}?key=${apiKey}`, {
@@ -190,26 +229,49 @@
             const data = await res.json();
 
             if (data.error) {
-                setStatus('APIエラー: ' + data.error.message.slice(0, 40));
+                setStatus('エラー: ' + data.error.message.slice(0, 50));
+                isProcessing = false;
+                showLoading(false);
                 return;
             }
 
-            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
             if (text && text !== '（テキストなし）') {
+                document.getElementById('translation-text').style.color = '#f0f0f0';
                 document.getElementById('translation-text').textContent = text;
             }
+
             const t = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             setStatus('✓ ' + t);
         } catch (e) {
             setStatus('ネットワークエラー');
-        } finally {
-            isProcessing = false;
         }
+
+        showLoading(false);
+        isProcessing = false;
+    }
+
+    function togglePause() {
+        isPaused = !isPaused;
+        document.getElementById('toggle-btn').textContent = isPaused ? '▶ 再開' : '⏸ 停止';
+        setStatus(isPaused ? '停止中' : '翻訳中');
+    }
+
+    function resetKey() {
+        if (!confirm('APIキーをリセットしますか？')) return;
+        localStorage.removeItem('gemini_api_key');
+        location.reload();
+    }
+
+    function showLoading(on) {
+        document.getElementById('loading-indicator').style.display = on ? 'block' : 'none';
     }
 
     function setStatus(msg) {
         document.getElementById('status-text').textContent = msg;
     }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 </script>
 </body>
 </html>
