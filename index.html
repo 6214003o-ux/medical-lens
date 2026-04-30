@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>医学論文リアルタイム翻訳</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; color: #fff; font-family: sans-serif; height: 100dvh; overflow: hidden; }
+
+        /* --- セットアップ画面 --- */
+        #setup {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; height: 100dvh; padding: 24px;
+            text-align: center; background: #111;
+        }
+        #setup h1 { font-size: 1.4em; margin-bottom: 12px; }
+        #setup p  { color: #aaa; font-size: 0.9em; margin-bottom: 24px; line-height: 1.6; }
+        #setup input {
+            width: 100%; padding: 14px; font-size: 1em; border-radius: 10px;
+            border: 1px solid #444; background: #222; color: #fff; margin-bottom: 12px;
+        }
+        #setup button {
+            width: 100%; padding: 16px; font-size: 1.1em;
+            background: #4285f4; color: #fff; border: none; border-radius: 10px; cursor: pointer;
+        }
+        .note { font-size: 0.78em; color: #666; margin-top: 14px; }
+
+        /* --- メイン画面 --- */
+        #app { display: none; position: relative; height: 100dvh; }
+
+        #video {
+            width: 100%; height: 58dvh; object-fit: cover; display: block; background: #000;
+        }
+
+        #translation-box {
+            position: absolute; bottom: 0; left: 0; right: 0; height: 42dvh;
+            background: rgba(10,10,10,0.95); padding: 14px 16px; overflow-y: auto;
+        }
+        #translation-label {
+            font-size: 0.72em; color: #666; margin-bottom: 6px; letter-spacing: 0.05em;
+        }
+        #translation-text {
+            font-size: 1.05em; line-height: 1.75; color: #f0f0f0; white-space: pre-wrap;
+        }
+
+        #status-bar {
+            position: absolute; top: 0; left: 0; right: 0;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 12px; background: rgba(0,0,0,0.55);
+        }
+        #status-text { font-size: 0.78em; color: #ccc; }
+
+        #toggle-btn {
+            background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+            color: #fff; padding: 6px 14px; border-radius: 20px;
+            font-size: 0.82em; cursor: pointer;
+        }
+        #reset-btn {
+            background: none; border: none; color: #666; font-size: 0.78em; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<!-- セットアップ画面 -->
+<div id="setup">
+    <h1>📋 医学論文翻訳</h1>
+    <p>Gemini APIキーを入力してください。<br>一度入力すれば次回から不要です。</p>
+    <input type="password" id="api-key-input" placeholder="AIza...（Google AI Studioで取得）">
+    <button onclick="saveAndStart()">カメラを起動して翻訳開始</button>
+    <p class="note">APIキーはこのデバイスのブラウザ内にのみ保存されます。<br>外部には送信されません。</p>
+</div>
+
+<!-- メイン翻訳画面 -->
+<div id="app">
+    <video id="video" autoplay playsinline muted></video>
+
+    <div id="status-bar">
+        <span id="status-text">起動中...</span>
+        <button id="toggle-btn" onclick="togglePause()">⏸ 一時停止</button>
+        <button id="reset-btn" onclick="resetKey()">キー変更</button>
+    </div>
+
+    <div id="translation-box">
+        <div id="translation-label">翻訳結果</div>
+        <div id="translation-text">カメラを英語テキストに向けてください</div>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+    const INTERVAL_MS = 1800;
+    const PROMPT = `画像内の英語テキストを自然な日本語に翻訳してください。
+医学・生殖医療・不妊治療の専門用語は正確に訳してください。
+英語以外のテキストがない場合は「（テキストなし）」とだけ返してください。
+翻訳文のみ返してください。説明や前置きは不要です。`;
+
+    let apiKey = '';
+    let isRunning = false;
+    let intervalId = null;
+    let isProcessing = false;
+
+    window.onload = () => {
+        const saved = localStorage.getItem('gemini_api_key');
+        if (saved) { apiKey = saved; startApp(); }
+    };
+
+    function saveAndStart() {
+        const key = document.getElementById('api-key-input').value.trim();
+        if (!key.startsWith('AIza')) {
+            alert('APIキーの形式が正しくありません（AIzaで始まるキーを入力してください）');
+            return;
+        }
+        localStorage.setItem('gemini_api_key', key);
+        apiKey = key;
+        startApp();
+    }
+
+    async function startApp() {
+        document.getElementById('setup').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        await startCamera();
+        startInterval();
+    }
+
+    async function startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+            });
+            document.getElementById('video').srcObject = stream;
+        } catch (e) {
+            alert('カメラへのアクセスが拒否されました。\nChromeのアドレスバー横の🔒をタップしてカメラを許可してください。');
+        }
+    }
+
+    function startInterval() {
+        isRunning = true;
+        intervalId = setInterval(captureAndTranslate, INTERVAL_MS);
+    }
+
+    function togglePause() {
+        if (isRunning) {
+            clearInterval(intervalId);
+            isRunning = false;
+            document.getElementById('toggle-btn').textContent = '▶ 再開';
+            document.getElementById('status-text').textContent = '一時停止中';
+        } else {
+            startInterval();
+            document.getElementById('toggle-btn').textContent = '⏸ 一時停止';
+        }
+    }
+
+    function resetKey() {
+        if (!confirm('APIキーをリセットしますか？')) return;
+        localStorage.removeItem('gemini_api_key');
+        location.reload();
+    }
+
+    async function captureAndTranslate() {
+        if (isProcessing) return;
+        const video = document.getElementById('video');
+        if (video.readyState < 2) return;
+
+        isProcessing = true;
+        setStatus('翻訳中...');
+
+        const canvas = document.createElement('canvas');
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+        try {
+            const res = await fetch(`${API_URL}?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [
+                            { text: PROMPT },
+                            { inline_data: { mime_type: 'image/jpeg', data: base64 } }
+                        ]
+                    }],
+                    generationConfig: { maxOutputTokens: 1024, temperature: 0.1 }
+                })
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+                setStatus('APIエラー: ' + data.error.message.slice(0, 40));
+                return;
+            }
+
+            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+            if (text && text !== '（テキストなし）') {
+                document.getElementById('translation-text').textContent = text;
+            }
+            const t = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            setStatus('✓ ' + t);
+        } catch (e) {
+            setStatus('ネットワークエラー');
+        } finally {
+            isProcessing = false;
+        }
+    }
+
+    function setStatus(msg) {
+        document.getElementById('status-text').textContent = msg;
+    }
+</script>
+</body>
+</html>
